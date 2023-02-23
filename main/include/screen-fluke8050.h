@@ -5,5 +5,5 @@
 #include "freertos/task.h"
 #include "lvgl/lvgl.h"
 
-void *hello_world_screen_init(lv_obj_t *screen);
-void hello_world_screen_worker(lv_obj_t *screen, void *priv);
+void *fluke8050_screen_init(lv_obj_t *screen);
+void fluke8050_screen_worker(lv_obj_t *screen, void *priv);

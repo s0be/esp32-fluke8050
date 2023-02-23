@@ -1,13 +1,9 @@
 idf_component_register(
     SRCS
-        demo-screens/demo-screen-color-rotate.c
-        demo-screens/demo-screen-common.c
-        demo-screens/demo-screen-hello-world.c
-        demo-screens/demo-screen-voltage.c
-        demo-screens/demo-screen-wifi.c
+        screen/screen-core.c
+        screen/screen-fluke8050.c
         tasks/task-button.c
-        tasks/task-voltage.c
-        tasks/task-wifi.c
+        tasks/esp32-cpu1.c
         ttgo-xy-cp-v1.1-freertos.c
     INCLUDE_DIRS
         include/

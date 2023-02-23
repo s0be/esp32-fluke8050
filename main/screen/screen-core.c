@@ -1,14 +1,11 @@
+#include "screen-core.h"
+
+#include "driver/ledc.h"
 #include "esp_log.h"
-
-#include "demo-screen-common.h"
-#include "demo-screen-hello-world.h"
-#include "demo-screen-color-rotate.h"
-#include "demo-screen-voltage.h"
-#include "demo-screen-wifi.h"
-
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
 #include "lvgl_tft/st7789.h"
+#include "screen-fluke8050.h"
 
 #define TFT_MOSI GPIO_NUM_19
 #define TFT_SCLK GPIO_NUM_18
@@ -47,15 +44,16 @@ void tick_task(void *arg) { lv_tick_inc(10); }
 void display_content_worker(lv_task_t *param) {
     display_content_worker_data_t *wdata =
         (display_content_worker_data_t *)param->user_data;
-    display_mode_t new_mode = MAX_DISPLAY_MODE;
+    display_mode_t new_mode = FLUKE_8050A;
     if (xQueueReceive(wdata->display_event_queue, &new_mode, 0) == pdTRUE) {
-        if(new_mode != wdata->mode) {
+        if (new_mode != wdata->mode) {
             lv_scr_load_anim_t anim = LV_SCR_LOAD_ANIM_MOVE_RIGHT;
             if (wdata->mode < new_mode) {
                 anim = LV_SCR_LOAD_ANIM_MOVE_LEFT;
             }
 
-            lv_scr_load_anim(wdata->screen[new_mode].screen, anim, 100, 10, false);
+            lv_scr_load_anim(wdata->screen[new_mode].screen, anim, 100, 10,
+                             false);
 
             if (wdata->screen[wdata->mode].unload_cb != NULL) {
                 wdata->screen[wdata->mode].unload_cb(
@@ -64,16 +62,15 @@ void display_content_worker(lv_task_t *param) {
             }
 
             if (wdata->screen[new_mode].load_cb != NULL) {
-                wdata->screen[new_mode].load_cb(
-                    wdata->screen[new_mode].screen,
-                    wdata->screen[new_mode].priv);
+                wdata->screen[new_mode].load_cb(wdata->screen[new_mode].screen,
+                                                wdata->screen[new_mode].priv);
             }
 
             wdata->mode = new_mode;
         }
-    } 
+    }
 
-    if(wdata->screen[wdata->mode].tick_cb != NULL) {
+    if (wdata->screen[wdata->mode].tick_cb != NULL) {
         wdata->screen[wdata->mode].tick_cb(wdata->screen[wdata->mode].screen,
                                            wdata->screen[wdata->mode].priv);
     }
@@ -83,6 +80,14 @@ void show_display(display_handle_t disp_handle, display_mode_t disp) {
     display_data_t *ddata = (display_data_t *)disp_handle;
     xQueueSend(ddata->display_event_queue, &disp, pdMS_TO_TICKS(100));
 }
+
+static uint16_t brightness = 4096;
+void set_brightness(uint16_t newbrightness) {
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, newbrightness);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    brightness = newbrightness;
+}
+uint16_t get_brightness() { return brightness; }
 
 void display_worker(void *param) {
     display_content_worker_data_t *dwdata = param;
@@ -115,50 +120,45 @@ void display_worker(void *param) {
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, 1000));
 
-    dwdata->mode = HELLO_WORLD;
+    dwdata->mode = FLUKE_8050A;
 
     lv_style_t *style = calloc(1, sizeof(lv_style_t));
 
     dwdata->my_style = style;
     lv_style_init(style);
-    lv_style_set_text_color(style,
-                            LV_STATE_DEFAULT, LV_COLOR_GREEN);
-    lv_style_set_bg_color(style, LV_STATE_DEFAULT,
-                            LV_COLOR_BLACK);
-    
-    lv_obj_t *hello_world_screen = lv_obj_create(NULL, NULL);
-    lv_obj_add_style(hello_world_screen, LV_OBJ_PART_MAIN, style);
-    dwdata->screen[HELLO_WORLD].priv =
-        hello_world_screen_init(hello_world_screen);
-    dwdata->screen[HELLO_WORLD].screen = hello_world_screen;
-    dwdata->screen[HELLO_WORLD].tick_cb = hello_world_screen_worker;
+    lv_style_set_text_color(style, LV_STATE_DEFAULT, LV_COLOR_GREEN);
+    lv_style_set_bg_color(style, LV_STATE_DEFAULT, LV_COLOR_BLACK);
 
-    lv_obj_t *color_rotate_screen = lv_obj_create(NULL, NULL);
-    lv_obj_add_style(color_rotate_screen, LV_OBJ_PART_MAIN, style);
-    dwdata->screen[COLOR_ROTATE].priv =
-        color_rotate_screen_init(color_rotate_screen);
-    dwdata->screen[COLOR_ROTATE].screen = color_rotate_screen;
-    dwdata->screen[COLOR_ROTATE].tick_cb = color_rotate_screen_worker;
+    lv_obj_t *fluke8050_screen = lv_obj_create(NULL, NULL);
+    lv_obj_add_style(fluke8050_screen, LV_OBJ_PART_MAIN, style);
+    lv_obj_set_size(fluke8050_screen, CONFIG_LV_DISPLAY_WIDTH,
+                    CONFIG_LV_DISPLAY_HEIGHT);
+    dwdata->screen[0].priv = fluke8050_screen_init(fluke8050_screen);
+    dwdata->screen[0].screen = fluke8050_screen;
+    dwdata->screen[0].tick_cb = fluke8050_screen_worker;
 
-    lv_obj_t *voltage_screen = lv_obj_create(NULL, NULL);
-    lv_obj_add_style(voltage_screen, LV_OBJ_PART_MAIN, style);
-    dwdata->screen[VOLTAGE].priv = voltage_screen_init(voltage_screen);
-    dwdata->screen[VOLTAGE].screen = voltage_screen;
-    dwdata->screen[VOLTAGE].tick_cb = voltage_screen_worker;
-    dwdata->screen[VOLTAGE].load_cb = voltage_screen_load;
-    dwdata->screen[VOLTAGE].unload_cb = voltage_screen_unload;
-
-    lv_obj_t *wifi_screen = lv_obj_create(NULL, NULL);
-    lv_obj_add_style(wifi_screen, LV_OBJ_PART_MAIN, style);
-    dwdata->screen[WIFI].priv = wifi_screen_init(wifi_screen);
-    dwdata->screen[WIFI].screen = wifi_screen;
-    dwdata->screen[WIFI].tick_cb = wifi_screen_worker;
-
-    // wifi_screen_init(worker_d);
-
-    lv_scr_load(dwdata->screen[HELLO_WORLD].screen);
+    lv_scr_load(dwdata->screen[0].screen);
     lv_task_t *task =
         lv_task_create(display_content_worker, 100, LV_TASK_PRIO_LOW, dwdata);
+
+    ledc_timer_config_t ledc_timer = {.speed_mode = LEDC_LOW_SPEED_MODE,
+                                      .timer_num = LEDC_TIMER_0,
+                                      .duty_resolution = LEDC_TIMER_13_BIT,
+                                      .freq_hz = 1000,
+                                      .clk_cfg = LEDC_AUTO_CLK};
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+
+    ledc_channel_config_t bl_pwm = {.speed_mode = LEDC_LOW_SPEED_MODE,
+                                    .channel = LEDC_CHANNEL_0,
+                                    .intr_type = LEDC_INTR_DISABLE,
+                                    .timer_sel = LEDC_TIMER_0,
+                                    .gpio_num = TFT_BL,
+                                    .duty = 0,
+                                    .hpoint = 0};
+
+    ESP_ERROR_CHECK(ledc_channel_config(&bl_pwm));
+
+    set_brightness(brightness);
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -175,7 +175,6 @@ display_handle_t init_display(int screen_count) {
         ESP_LOGE(display_tag, "Failed to create dwdata");
         vTaskDelay(portMAX_DELAY);
     }
-    
 
     dwdata->display_event_queue = xQueueCreate(10, sizeof(display_mode_t));
     if (dwdata->display_event_queue == NULL) {
@@ -200,8 +199,8 @@ display_handle_t init_display(int screen_count) {
         vTaskDelay(portMAX_DELAY);
     }
 
-    BaseType_t ret = xTaskCreatePinnedToCore(&display_worker, display_tag, 4 * 1024,
-                                    dwdata, 3, &ddata->display_task, 1);
+    BaseType_t ret = xTaskCreate(&display_worker, display_tag, 4 * 1024, dwdata,
+                                 3, &ddata->display_task);
     if (ret != pdTRUE) {
         ESP_LOGE(display_tag, "Failed to create the display_task");
         vTaskDelay(portMAX_DELAY);
